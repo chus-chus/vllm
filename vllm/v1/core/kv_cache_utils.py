@@ -60,8 +60,10 @@ class PrefixCachingMetrics:
         self.aggregated_requests = 0
         self.aggregated_query_total = 0
         self.aggregated_query_hit = 0
+        self.aggregated_partial_req_hits = 0
+        self.aggregated_full_req_hits = 0
         # A deque of (requests, queries, hits) for the most recent requests.
-        self.query_queue: deque[tuple[int, int, int]] = deque()
+        # self.query_queue: deque[tuple[int, int, int]] = deque()
 
     def observe(self, stats: PrefixCacheStats):
         """Observe the prefix caching for a set of requests.
@@ -70,7 +72,7 @@ class PrefixCachingMetrics:
         are being scheduled and are looking for computed blocks.
 
         When there are more than `interval` requests, the oldest set of
-        requestsare removed from the metrics.
+        requests are removed from the metrics.
 
         Args:
             stats: The prefix cache stats.
@@ -81,24 +83,26 @@ class PrefixCachingMetrics:
             self.reset()
 
         # Update the metrics.
-        self.query_queue.append((stats.requests, stats.queries, stats.hits))
+        # self.query_queue.append((stats.requests, stats.queries, stats.hits))
         self.aggregated_requests += stats.requests
         self.aggregated_query_total += stats.queries
         self.aggregated_query_hit += stats.hits
+        self.aggregated_partial_req_hits += stats.partial_req_hits
+        self.aggregated_full_req_hits += stats.full_req_hits
 
-        # Remove the oldest stats if the number of requests exceeds.
-        if self.aggregated_requests > self.interval:
-            old_requests, old_queries, old_hits = self.query_queue.popleft()
-            self.aggregated_requests -= old_requests
-            self.aggregated_query_total -= old_queries
-            self.aggregated_query_hit -= old_hits
+        # Commented out to obtain total hit rate
+        # if self.aggregated_requests > self.interval:
+        #     # old_requests, old_queries, old_hits = self.query_queue.popleft()
+        #     self.aggregated_requests -= old_requests
+        #     self.aggregated_query_total -= old_queries
+        #     self.aggregated_query_hit -= old_hits
 
     def reset(self):
         """Reset the metrics."""
         self.aggregated_requests = 0
         self.aggregated_query_total = 0
         self.aggregated_query_hit = 0
-        self.query_queue.clear()
+        # self.query_queue.clear()
 
     @property
     def hit_rate(self) -> float:
@@ -106,6 +110,20 @@ class PrefixCachingMetrics:
         if self.aggregated_query_total == 0:
             return 0.0
         return self.aggregated_query_hit / self.aggregated_query_total
+    
+    @property
+    def hit_rate_partial_req(self) -> float:
+        """Calculate the partial request hit rate for the past N requests."""
+        if self.aggregated_requests == 0:
+            return 0.0
+        return self.aggregated_partial_req_hits / self.aggregated_requests
+    
+    @property
+    def hit_rate_full_req(self) -> float:
+        """Calculate the full request hit rate for the past N requests."""
+        if self.aggregated_requests == 0:
+            return 0.0
+        return self.aggregated_full_req_hits / self.aggregated_requests
 
 
 @dataclass

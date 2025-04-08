@@ -53,6 +53,7 @@ class LoggingStatLogger(StatLoggerBase):
         self.num_prompt_tokens.append(iteration_stats.num_prompt_tokens)
         self.num_generation_tokens.append(
             iteration_stats.num_generation_tokens)
+        self.prefill_time = sum([req.prefill_time for req in iteration_stats.finished_requests])
 
     def _get_throughput(self, tracked_stats: list[int], now: float) -> float:
         # Compute summary metrics for tracked stats
@@ -91,6 +92,9 @@ class LoggingStatLogger(StatLoggerBase):
             "Running: %d reqs, Waiting: %d reqs, "
             "GPU KV cache usage: %.1f%%, "
             "Prefix cache hit rate: %.1f%%",
+            "Partial request hit rate: %.1f%%, "
+            "Full request hit rate: %.1f%%, "
+            "Prefill time: %.3f sec",
             self.engine_index,
             prompt_throughput,
             generation_throughput,
@@ -98,6 +102,9 @@ class LoggingStatLogger(StatLoggerBase):
             scheduler_stats.num_waiting_reqs,
             scheduler_stats.gpu_cache_usage * 100,
             self.prefix_caching_metrics.hit_rate * 100,
+            self.prefix_caching_metrics.hit_rate_partial_req * 100,
+            self.prefix_caching_metrics.hit_rate_full_req * 100,
+            self.prefill_time,
         )
 
         if scheduler_stats.spec_decoding_stats is not None:

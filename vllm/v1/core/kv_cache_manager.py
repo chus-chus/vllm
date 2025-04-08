@@ -147,6 +147,11 @@ class KVCacheManager:
             self.specialized_manager.find_longest_cache_hit(block_hashes))
         self.prefix_cache_stats.queries += len(block_hashes)
         self.prefix_cache_stats.hits += len(computed_blocks)
+        
+        if len(computed_blocks > 0):
+            self.prefix_cache_stats.partial_req_hits += 1
+            if len(computed_blocks) == len(block_hashes):
+                self.prefix_cache_stats.full_req_hits += 1
 
         if last_block_hash is not None:
             # Add back the last block hash if it was removed.
