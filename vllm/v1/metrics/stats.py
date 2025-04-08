@@ -23,10 +23,12 @@ class PrefixCacheStats:
     queries: int = 0
     # The number of hits in these requests.
     hits: int = 0
-    # The number of partial request hits in these requests.
-    partial_req_hits: int = 0
-    # The number of full request hits
-    full_req_hits: int = 0
+    # The number of cache evictions 
+    evictions: int = 0
+    # The number of request-level hits
+    request_hits: int = 0
+    # The number of request-level evictions
+    request_evictions: int = 0
 
 
 @dataclass

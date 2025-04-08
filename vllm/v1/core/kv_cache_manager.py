@@ -149,9 +149,7 @@ class KVCacheManager:
         self.prefix_cache_stats.hits += len(computed_blocks)
         
         if len(computed_blocks > 0):
-            self.prefix_cache_stats.partial_req_hits += 1
-            if len(computed_blocks) == len(block_hashes):
-                self.prefix_cache_stats.full_req_hits += 1
+            self.prefix_cache_stats.request_hits += 1
 
         if last_block_hash is not None:
             # Add back the last block hash if it was removed.

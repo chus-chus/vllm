@@ -60,8 +60,9 @@ class PrefixCachingMetrics:
         self.aggregated_requests = 0
         self.aggregated_query_total = 0
         self.aggregated_query_hit = 0
-        self.aggregated_partial_req_hits = 0
-        self.aggregated_full_req_hits = 0
+        self.aggregated_query_eviction = 0
+        self.aggregated_request_hit = 0
+        self.aggregated_request_eviction = 0
         # A deque of (requests, queries, hits) for the most recent requests.
         # self.query_queue: deque[tuple[int, int, int]] = deque()
 
@@ -87,8 +88,9 @@ class PrefixCachingMetrics:
         self.aggregated_requests += stats.requests
         self.aggregated_query_total += stats.queries
         self.aggregated_query_hit += stats.hits
-        self.aggregated_partial_req_hits += stats.partial_req_hits
-        self.aggregated_full_req_hits += stats.full_req_hits
+        self.aggregated_query_eviction += stats.evictions
+        self.aggregated_request_hit += stats.request_hits
+        self.aggregated_request_eviction += stats.request_evictions
 
         # Commented out to obtain total hit rate
         # if self.aggregated_requests > self.interval:
@@ -102,7 +104,9 @@ class PrefixCachingMetrics:
         self.aggregated_requests = 0
         self.aggregated_query_total = 0
         self.aggregated_query_hit = 0
-        # self.query_queue.clear()
+        self.aggregated_query_eviction
+        self.aggregated_request_hit = 0
+        self.aggregated_request_eviction = 0
 
     @property
     def hit_rate(self) -> float:
@@ -111,19 +115,9 @@ class PrefixCachingMetrics:
             return 0.0
         return self.aggregated_query_hit / self.aggregated_query_total
     
-    @property
-    def hit_rate_partial_req(self) -> float:
-        """Calculate the partial request hit rate for the past N requests."""
-        if self.aggregated_requests == 0:
-            return 0.0
-        return self.aggregated_partial_req_hits / self.aggregated_requests
-    
-    @property
-    def hit_rate_full_req(self) -> float:
-        """Calculate the full request hit rate for the past N requests."""
-        if self.aggregated_requests == 0:
-            return 0.0
-        return self.aggregated_full_req_hits / self.aggregated_requests
+    @property 
+    def get_stats(self) -> dict[str, float]:
+        pass
 
 
 @dataclass

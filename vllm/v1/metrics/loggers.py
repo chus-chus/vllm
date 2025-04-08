@@ -92,9 +92,6 @@ class LoggingStatLogger(StatLoggerBase):
             "Running: %d reqs, Waiting: %d reqs, "
             "GPU KV cache usage: %.1f%%, "
             "Prefix cache hit rate: %.1f%%",
-            "Partial request hit rate: %.1f%%, "
-            "Full request hit rate: %.1f%%, "
-            "Prefill time: %.3f sec",
             self.engine_index,
             prompt_throughput,
             generation_throughput,
@@ -102,13 +99,15 @@ class LoggingStatLogger(StatLoggerBase):
             scheduler_stats.num_waiting_reqs,
             scheduler_stats.gpu_cache_usage * 100,
             self.prefix_caching_metrics.hit_rate * 100,
-            self.prefix_caching_metrics.hit_rate_partial_req * 100,
-            self.prefix_caching_metrics.hit_rate_full_req * 100,
-            self.prefill_time,
         )
 
         if scheduler_stats.spec_decoding_stats is not None:
             self.spec_decoding_metrics.log()
+            
+class CacheTelemetry(LoggingStatLogger):
+    
+    def log_stats(self):
+        pass
 
 
 class PrometheusStatLogger(StatLoggerBase):
