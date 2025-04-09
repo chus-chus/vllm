@@ -35,7 +35,7 @@ from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.engine.processor import Processor
 from vllm.v1.executor.abstract import Executor
 from vllm.v1.metrics.loggers import (LoggingStatLogger, PrometheusStatLogger,
-                                     StatLoggerBase)
+                                     StatLoggerBase, CacheTelemetryLogger)
 from vllm.v1.metrics.stats import IterationStats, SchedulerStats
 
 logger = init_logger(__name__)
@@ -73,10 +73,15 @@ class AsyncLLM(EngineClient):
         if self.log_stats:
             for i in range(vllm_config.parallel_config.data_parallel_size):
                 loggers: list[StatLoggerBase] = []
-                if logger.isEnabledFor(logging.INFO):
-                    loggers.append(LoggingStatLogger(engine_index=i))
+                # Only logging the cache telemetry for now.
+                
+                # if logger.isEnabledFor(logging.INFO):
+                #     loggers.append(LoggingStatLogger(engine_index=i))
+                # loggers.append(
+                #     PrometheusStatLogger(vllm_config, engine_index=i))
+                
                 loggers.append(
-                    PrometheusStatLogger(vllm_config, engine_index=i))
+                    CacheTelemetryLogger(engine_index=i))
                 self.stat_loggers.append(loggers)
 
         # Tokenizer (+ ensure liveness if running in another process).
