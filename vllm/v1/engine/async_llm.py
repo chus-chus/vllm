@@ -71,8 +71,7 @@ class AsyncLLM(EngineClient):
         # Set up stat loggers; independent set for each DP rank.
         self.stat_loggers: list[list[StatLoggerBase]] = []
         if self.log_stats:
-            for i in range(vllm_config.parallel_config.data_parallel_size):
-                loggers: list[StatLoggerBase] = []
+            loggers: list[StatLoggerBase] = []
                 # Only logging the cache telemetry for now.
                 
                 # if logger.isEnabledFor(logging.INFO):
@@ -80,9 +79,8 @@ class AsyncLLM(EngineClient):
                 # loggers.append(
                 #     PrometheusStatLogger(vllm_config, engine_index=i))
                 
-                loggers.append(
-                    CacheTelemetryLogger(engine_index=i))
-                self.stat_loggers.append(loggers)
+            loggers.append(CacheTelemetryLogger())
+            self.stat_loggers.append(loggers)
 
         # Tokenizer (+ ensure liveness if running in another process).
         self.tokenizer = init_tokenizer_from_configs(
@@ -370,7 +368,7 @@ class AsyncLLM(EngineClient):
 
         assert scheduler_stats is not None
         for stat_logger in self.stat_loggers[engine_index]:
-            stat_logger.record(scheduler_stats=scheduler_stats,
+            stat_logger.record(engine_index, scheduler_stats=scheduler_stats,
                                iteration_stats=iteration_stats)
 
     def encode(

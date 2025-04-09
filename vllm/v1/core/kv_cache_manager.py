@@ -113,6 +113,7 @@ class KVCacheManager:
                 - A list of blocks that are computed for the request.
                 - The number of computed tokens.
         """
+        
         if not self.enable_caching:
             # Prefix caching is disabled.
             return [], 0
@@ -145,10 +146,11 @@ class KVCacheManager:
 
         computed_blocks = (
             self.specialized_manager.find_longest_cache_hit(block_hashes))
+        
         self.prefix_cache_stats.queries += len(block_hashes)
         self.prefix_cache_stats.hits += len(computed_blocks)
         
-        if len(computed_blocks > 0):
+        if len(computed_blocks) > 0:
             self.prefix_cache_stats.request_hits += 1
 
         if last_block_hash is not None:

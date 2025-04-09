@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 import json
 import os
+import datetime
 
 import numpy as np
 import prometheus_client
@@ -105,36 +106,74 @@ class LoggingStatLogger(StatLoggerBase):
 
         if scheduler_stats.spec_decoding_stats is not None:
             self.spec_decoding_metrics.log()
-            
+
 class CacheTelemetryLogger(StatLoggerBase):
     """
-    Records detailed prefix cache statistics periodically to a JSON file.
+    Records detailed prefix cache statistics for all engines periodically
+    to a single JSON file, including aggregated totals.
     """
-    def __init__(self, engine_index: int = 0, output_dir: str = "cache_telemetry_output"):
-        self.engine_index = engine_index
-        self.prefix_caching_metrics = PrefixCachingMetrics()
+    def __init__(self, engine_index: int = 0,output_dir: str = "cache_telemetry_output"):
+        self.per_engine_metrics: dict[int, PrefixCachingMetrics] = {}
         self.output_dir = output_dir
-        # Create the output directory immediately if it doesn't exist
+        self.prefill_time = 0
         os.makedirs(self.output_dir, exist_ok=True)
-        logger.info(f"CacheTelemetryLogger initialized. Outputting stats to: {self.output_dir}")
+        self.filepath = os.path.join(self.output_dir, "cache_telemetry.json")
+        logger.info(f"CacheTelemetryLogger initialized. Outputting combined stats to: {self.filepath}")
 
-
-    def record(self, scheduler_stats: SchedulerStats,
+    def record(self, engine_index: int, scheduler_stats: SchedulerStats,
                iteration_stats: Optional[IterationStats]):
-        """Observe prefix cache stats from the scheduler."""
         if scheduler_stats and scheduler_stats.prefix_cache_stats:
-            self.prefix_caching_metrics.observe(scheduler_stats.prefix_cache_stats)
+            if engine_index not in self.per_engine_metrics:
+                self.per_engine_metrics[engine_index] = PrefixCachingMetrics()
+                logger.info(f"First stats received from engine {engine_index}. Initializing metrics.")
+            self.per_engine_metrics[engine_index].observe(scheduler_stats.prefix_cache_stats)
+            
+        if iteration_stats:
+            self.prefill_time += sum([req.prefill_time for req in iteration_stats.finished_requests])
+
+    def _calculate_total_stats(self) -> dict:
+        """Helper method to aggregate stats across all engines."""
+        if not self.per_engine_metrics:
+            empty_stats = PrefixCachingMetrics().get_stats()
+            empty_stats.setdefault("request_level", {})["request_evictions"] = 0
+            return empty_stats
+
+        total_metrics = PrefixCachingMetrics(interval=0)
+
+        for engine_metrics in self.per_engine_metrics.values():
+            total_metrics.aggregated_requests += engine_metrics.aggregated_requests
+            total_metrics.aggregated_query_total += engine_metrics.aggregated_query_total
+            total_metrics.aggregated_query_hit += engine_metrics.aggregated_query_hit
+            total_metrics.aggregated_block_eviction += engine_metrics.aggregated_block_eviction
+            total_metrics.aggregated_request_hit += engine_metrics.aggregated_request_hit
+
+        total_stats = total_metrics.get_stats()
+
+        return total_stats
 
     def log(self):
-        """Get aggregated cache stats and write them to a timestamped JSON file."""
-        # Retrieve the structured statistics dictionary
-        stats = self.prefix_caching_metrics.get_stats()
+        """Get aggregated cache stats for all engines and totals,
+           and write them to a single JSON file."""
 
-        filename = f"cache_telemetry_engine_{self.engine_index:03d}.json"
-        filepath = os.path.join(self.output_dir, filename)
+        engine_stats_dict = {}
+        sorted_engine_indices = sorted(self.per_engine_metrics.keys())
 
-        with open(filepath, "w") as f:
-            json.dump(stats, f, indent=4)
+        for engine_idx in sorted_engine_indices:
+            engine_metrics = self.per_engine_metrics[engine_idx]
+            stats = engine_metrics.get_stats()
+            engine_stats_dict[engine_idx] = stats
+
+        total_stats = self._calculate_total_stats()
+
+        output_data = {
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"), # Added microseconds
+            "engines": engine_stats_dict,
+            "total": total_stats,
+            "prefill_time": self.prefill_time,
+        }
+
+        with open(self.filepath, "w") as f:
+            json.dump(output_data, f, indent=4)
 
 class PrometheusStatLogger(StatLoggerBase):
 

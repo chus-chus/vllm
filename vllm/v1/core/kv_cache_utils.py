@@ -4,7 +4,6 @@ import os
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-import datetime
 from typing import Any, Callable, NamedTuple, Optional
 
 from vllm.config import VllmConfig
@@ -149,7 +148,6 @@ class PrefixCachingMetrics:
                 "hit_rate": request_hit_rate,
                 "miss_rate": request_miss_rate,
             },
-            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
 
