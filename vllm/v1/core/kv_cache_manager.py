@@ -258,7 +258,13 @@ class KVCacheManager:
                 self.max_num_blocks_per_req - len(req_blocks),
             )
             assert num_new_blocks > 0
-
+            num_readily_free_blocks = self.block_pool.get_num_free_blocks()
+            
+            if(num_new_blocks > num_readily_free_blocks):
+                num_blocks_to_evict = num_new_blocks - num_readily_free_blocks
+                self.prefix_cache_stats.evictions += num_blocks_to_evict
+                self.prefix_cache_stats.request_evictions += 1
+                
             # Concatenate the computed block IDs and the new block IDs.
             new_blocks = self.block_pool.get_new_blocks(num_new_blocks)
             req_blocks.extend(new_blocks)

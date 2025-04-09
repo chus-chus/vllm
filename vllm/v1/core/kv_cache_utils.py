@@ -4,6 +4,7 @@ import os
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
+import datetime
 from typing import Any, Callable, NamedTuple, Optional
 
 from vllm.config import VllmConfig
@@ -60,7 +61,7 @@ class PrefixCachingMetrics:
         self.aggregated_requests = 0
         self.aggregated_query_total = 0
         self.aggregated_query_hit = 0
-        self.aggregated_query_eviction = 0
+        self.aggregated_block_eviction = 0
         self.aggregated_request_hit = 0
         self.aggregated_request_eviction = 0
         # A deque of (requests, queries, hits) for the most recent requests.
@@ -88,7 +89,7 @@ class PrefixCachingMetrics:
         self.aggregated_requests += stats.requests
         self.aggregated_query_total += stats.queries
         self.aggregated_query_hit += stats.hits
-        self.aggregated_query_eviction += stats.evictions
+        self.aggregated_block_eviction += stats.evictions
         self.aggregated_request_hit += stats.request_hits
         self.aggregated_request_eviction += stats.request_evictions
 
@@ -104,7 +105,7 @@ class PrefixCachingMetrics:
         self.aggregated_requests = 0
         self.aggregated_query_total = 0
         self.aggregated_query_hit = 0
-        self.aggregated_query_eviction
+        self.aggregated_block_eviction
         self.aggregated_request_hit = 0
         self.aggregated_request_eviction = 0
 
@@ -115,9 +116,41 @@ class PrefixCachingMetrics:
             return 0.0
         return self.aggregated_query_hit / self.aggregated_query_total
     
-    @property 
-    def get_stats(self) -> dict[str, float]:
-        pass
+    def get_stats(self) -> dict:
+        total_blocks = self.aggregated_query_total
+        total_hits = self.aggregated_query_hit
+        total_misses = total_blocks - total_hits
+        total_evictions = self.aggregated_block_eviction
+        
+        total_requests = self.aggregated_requests
+        total_request_hits = self.aggregated_request_hit
+        total_request_misses = total_requests - total_request_hits
+        total_request_evictions = self.aggregated_request_eviction
+        
+        block_hit_rate = total_hits / total_blocks if total_blocks > 0 else 0.0
+        block_miss_rate = total_misses / total_blocks if total_blocks > 0 else 0.0
+        
+        request_hit_rate = total_request_hits / total_requests if total_requests > 0 else 0.0
+        request_miss_rate = total_request_misses / total_requests if total_requests > 0 else 0.0
+        
+        return {
+            "block_level": {
+                "total_blocks": total_blocks,
+                "hits": total_hits,
+                "misses": total_misses,
+                "hit_rate": block_hit_rate,
+                "miss_rate": block_miss_rate,
+                "evictions": total_evictions,
+            },
+            "request_level": {
+                "unique_requests": total_requests,
+                "requests_with_hits": total_request_hits,
+                "requests_with_misses": total_request_misses,
+                "hit_rate": request_hit_rate,
+                "miss_rate": request_miss_rate,
+            },
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
 
 @dataclass

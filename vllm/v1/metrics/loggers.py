@@ -3,6 +3,8 @@
 import time
 from abc import ABC, abstractmethod
 from typing import Optional
+import json
+import os
 
 import numpy as np
 import prometheus_client
@@ -104,11 +106,35 @@ class LoggingStatLogger(StatLoggerBase):
         if scheduler_stats.spec_decoding_stats is not None:
             self.spec_decoding_metrics.log()
             
-class CacheTelemetry(LoggingStatLogger):
-    
-    def log_stats(self):
-        pass
+class CacheTelemetryLogger(StatLoggerBase):
+    """
+    Records detailed prefix cache statistics periodically to a JSON file.
+    """
+    def __init__(self, engine_index: int = 0, output_dir: str = "cache_telemetry_output"):
+        self.engine_index = engine_index
+        self.prefix_caching_metrics = PrefixCachingMetrics()
+        self.output_dir = output_dir
+        # Create the output directory immediately if it doesn't exist
+        os.makedirs(self.output_dir, exist_ok=True)
+        logger.info(f"CacheTelemetryLogger initialized. Outputting stats to: {self.output_dir}")
 
+
+    def record(self, scheduler_stats: SchedulerStats,
+               iteration_stats: Optional[IterationStats]):
+        """Observe prefix cache stats from the scheduler."""
+        if scheduler_stats and scheduler_stats.prefix_cache_stats:
+            self.prefix_caching_metrics.observe(scheduler_stats.prefix_cache_stats)
+
+    def log(self):
+        """Get aggregated cache stats and write them to a timestamped JSON file."""
+        # Retrieve the structured statistics dictionary
+        stats = self.prefix_caching_metrics.get_stats()
+
+        filename = f"cache_telemetry_engine_{self.engine_index:03d}.json"
+        filepath = os.path.join(self.output_dir, filename)
+
+        with open(filepath, "w") as f:
+            json.dump(stats, f, indent=4)
 
 class PrometheusStatLogger(StatLoggerBase):
 
