@@ -112,13 +112,16 @@ class CacheTelemetryLogger(StatLoggerBase):
     Records detailed prefix cache statistics for all engines periodically
     to a single JSON file, including aggregated totals.
     """
-    def __init__(self, engine_index: int = 0,output_dir: str = "cache_telemetry_output"):
+    def __init__(self, engine_index: int = 0,output_dir: str = "vllm_cache_telemetry_output"):
         self.per_engine_metrics: dict[int, PrefixCachingMetrics] = {}
         self.output_dir = output_dir
         self.prefill_time = 0
         os.makedirs(self.output_dir, exist_ok=True)
         self.filepath = os.path.join(self.output_dir, "cache_telemetry.json")
         logger.info(f"CacheTelemetryLogger initialized. Outputting combined stats to: {self.filepath}")
+        # Create the empty file
+        with open(self.filepath, "w") as f:
+            json.dump({}, f, indent=4)
 
     def record(self, engine_index: int, scheduler_stats: SchedulerStats,
                iteration_stats: Optional[IterationStats]):
@@ -154,6 +157,12 @@ class CacheTelemetryLogger(StatLoggerBase):
     def log(self):
         """Get aggregated cache stats for all engines and totals,
            and write them to a single JSON file."""
+           
+        # Check if file is present. If it is not present reset all the stats
+        if not os.path.exists(self.filepath):
+            logger.info(f"CacheTelemetryLogger: File not found, resetting all stats.")
+            self.per_engine_metrics = {}
+            self.prefill_time = 0
 
         engine_stats_dict = {}
         sorted_engine_indices = sorted(self.per_engine_metrics.keys())
