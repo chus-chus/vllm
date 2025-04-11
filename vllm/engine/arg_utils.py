@@ -213,6 +213,8 @@ class EngineArgs:
     enable_reasoning: Optional[bool] = None
     reasoning_parser: Optional[str] = None
     use_tqdm_on_load: bool = True
+    
+    cache_telemetry_output_dir: str = "vllm_cache_telemetry_output"
 
     def __post_init__(self):
         if not self.tokenizer:
@@ -1031,6 +1033,13 @@ class EngineArgs:
             "image tokens IIIIIIIIII) where only some image tokens can be "
             "scheduled (like TTTTIIIII, leaving IIIII), it will be scheduled "
             "as TTTT in one step and IIIIIIIIII in the next.")
+        
+        parser.add_argument(
+            "--cache-telemetry-output-dir",
+            type=str,
+            default="vllm_cache_telemetry_output",
+            help="The file path to the cache telemetry output file. "
+        )
 
         return parser
 
@@ -1040,6 +1049,7 @@ class EngineArgs:
         attrs = [attr.name for attr in dataclasses.fields(cls)]
         # Set the attributes from the parsed arguments.
         engine_args = cls(**{attr: getattr(args, attr) for attr in attrs})
+                
         return engine_args
 
     def create_model_config(self) -> ModelConfig:

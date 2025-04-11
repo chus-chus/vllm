@@ -267,7 +267,6 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         help=
         "If set to True, enable tracking server_load_metrics in the app state."
     )
-
     return parser
 
 

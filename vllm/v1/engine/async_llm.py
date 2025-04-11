@@ -53,6 +53,7 @@ class AsyncLLM(EngineClient):
         use_cached_outputs: bool = False,
         log_requests: bool = True,
         start_engine_loop: bool = True,
+        cache_telemetry_output_dir: str = None
     ) -> None:
         if not envs.VLLM_USE_V1:
             raise ValueError(
@@ -79,7 +80,7 @@ class AsyncLLM(EngineClient):
                 # loggers.append(
                 #     PrometheusStatLogger(vllm_config, engine_index=i))
                 
-            loggers.append(CacheTelemetryLogger())
+            loggers.append(CacheTelemetryLogger(output_dir=cache_telemetry_output_dir))
             self.stat_loggers.append(loggers)
 
         # Tokenizer (+ ensure liveness if running in another process).
@@ -121,6 +122,7 @@ class AsyncLLM(EngineClient):
         stat_loggers: Optional[dict[str, StatLoggerBase]] = None,
         disable_log_requests: bool = False,
         disable_log_stats: bool = False,
+        cache_telemetry_output_dir: str = None,
     ) -> "AsyncLLM":
         if not envs.VLLM_USE_V1:
             raise ValueError(
@@ -143,6 +145,7 @@ class AsyncLLM(EngineClient):
             log_requests=not disable_log_requests,
             log_stats=not disable_log_stats,
             usage_context=usage_context,
+            cache_telemetry_output_dir = cache_telemetry_output_dir,
         )
 
     @classmethod
