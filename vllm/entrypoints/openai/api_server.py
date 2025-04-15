@@ -179,8 +179,7 @@ async def build_async_engine_client_from_engine_args(
                 vllm_config=vllm_config,
                 usage_context=usage_context,
                 disable_log_requests=engine_args.disable_log_requests,
-                disable_log_stats=engine_args.disable_log_stats,
-                cache_telemetry_output_dir = engine_args.cache_telemetry_output_dir)
+                disable_log_stats=engine_args.disable_log_stats,)
             yield async_llm
         finally:
             if async_llm:

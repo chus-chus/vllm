@@ -1298,6 +1298,7 @@ class EngineArgs:
             max_num_partial_prefills=self.max_num_partial_prefills,
             max_long_partial_prefills=self.max_long_partial_prefills,
             long_prefill_token_threshold=self.long_prefill_token_threshold,
+            cache_telemetry_output_dir=self.cache_telemetry_output_dir,
         )
 
         lora_config = LoRAConfig(

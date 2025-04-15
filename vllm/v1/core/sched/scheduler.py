@@ -6,6 +6,8 @@ import time
 from collections import deque
 from collections.abc import Iterable
 from typing import Optional, Union
+import threading
+import time
 
 from vllm.config import CacheConfig, LoRAConfig, ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
@@ -25,6 +27,7 @@ from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 from vllm.v1.structured_output import StructuredOutputManager
+from vllm.v1.metrics.loggers import CacheTelemetry
 
 logger = init_logger(__name__)
 
@@ -49,6 +52,18 @@ class Scheduler(SchedulerInterface):
         self.kv_cache_config = kv_cache_config
         self.log_stats = log_stats
         self.structured_output_manager = structured_output_manager
+        
+        # Cache Telemetry runner
+        
+        self.cache_telemetry: Optional[CacheTelemetry] = None
+        self._telemetry_thread: Optional[threading.Thread] = None
+        self._telemetry_stop_event = threading.Event()
+        self.telemetry_interval_seconds = 5
+        
+        if self.log_stats:
+            self.cache_telemetry = CacheTelemetry(self.scheduler_config.cache_telemetry_output_dir)
+            
+        
 
         # include_finished_set controls whether a separate set of finished
         # request ids should be included in the EngineCoreOutputs returned
@@ -68,7 +83,8 @@ class Scheduler(SchedulerInterface):
             max_model_len=self.max_model_len,
             enable_caching=cache_config.enable_prefix_caching,
             caching_hash_algo=self.cache_config.prefix_caching_hash_algo,
-            log_stats=self.log_stats)
+            log_stats=self.log_stats,
+            cache_telemetry=self.cache_telemetry)
         self.block_size = self.cache_config.block_size
 
         # req_id -> Request
@@ -111,6 +127,26 @@ class Scheduler(SchedulerInterface):
         # for these models.
         self.encoder_cache_manager = EncoderCacheManager(
             cache_size=encoder_cache_size)
+        
+        if self.log_stats:
+            self._telemetry_thread = threading.Thread(target=self._run_telemetry, daemon=True)
+            self._telemetry_thread.start()
+            
+    def _run_telemetry(self):
+        while not self._telemetry_stop_event.is_set():
+            try:
+                if self.log_stats:
+                    self.cache_telemetry.record_stats()
+            except Exception as e:
+                logger.error(f"Error in telemetry thread: {e}", exc_info=True)
+            self._telemetry_stop_event.wait(self.telemetry_interval_seconds)
+            
+    def shutdown(self):
+        """Signals telemetry thread to stop and waits for it."""
+        logger.info("Shutting down Scheduler and Telemetry thread.")
+        if self._telemetry_thread:
+            self._telemetry_stop_event.set()
+            self._telemetry_thread.join(timeout=self.telemetry_interval_seconds + 5) # Wait a bit longer than interval
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:

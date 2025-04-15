@@ -38,6 +38,15 @@ class SchedulerInterface(ABC):
             requests.
         """
         raise NotImplementedError
+    
+    @abstractmethod
+    def shutdown() -> None:
+        """Shutdown the scheduler.
+
+        This method is called when the engine is shutting down. The scheduler
+        should clean up any resources it has allocated.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def update_from_output(

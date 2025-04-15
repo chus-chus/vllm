@@ -1737,6 +1737,8 @@ class SchedulerConfig:
     # scheduler class or path. "vllm.core.scheduler.Scheduler" (default)
     # or "mod.custom_class".
     scheduler_cls: Union[str, type[object]] = "vllm.core.scheduler.Scheduler"
+    
+    cache_telemetry_output_dir: Optional[str] = None
 
     def compute_hash(self) -> str:
         """

@@ -6,6 +6,7 @@ from typing import Optional
 import json
 import os
 import datetime
+import threading
 
 import numpy as np
 import prometheus_client
@@ -183,6 +184,171 @@ class CacheTelemetryLogger(StatLoggerBase):
 
         with open(self.filepath, "w") as f:
             json.dump(output_data, f, indent=4)
+            
+class CacheTelemetry:
+    """
+    Track cache hit/miss statistics at both request and block levels.
+    """
+
+    _file_lock = threading.Lock()
+
+    def __init__(self, output_dir: str, reset_cache_telemetry_on_new_file: bool = True):
+        print("[DEBUG] CacheTelemetry: Initializing telemetry tracking")
+        self.output_dir = output_dir
+        self.reset_cache_telemetry_on_new_file = reset_cache_telemetry_on_new_file
+        self.init_time = time.time()
+        self.reset()
+
+    def reset(self):
+        print("[DEBUG] CacheTelemetry: Resetting all telemetry counters")
+
+        # block
+        self.total_blocks = 0
+        self.total_hits = 0
+        self.total_misses = 0
+        self.total_evictions = 0
+        self.first_block = True
+
+        # block (time series)
+        self.total_blocks_ts = [] # (timestamp, num_blocks)
+        self.total_hits_ts = [] # (timestamp, num_hits)
+        self.total_misses_ts = [] # (timestamp, num_misses)
+        self.total_evictions_ts = [] # (timestamp, num_evictions)
+
+        # requests
+        self.unique_requests = 0
+        self.requests_with_hits = set()
+        self.requests_with_misses = set()
+        self.requests_with_evictions = set()
+
+        self.tracked_requests = set()   # To keep track of unique request IDs
+
+        # requests (time series)
+        self.unique_requests_ts = [] # (timestamp, num_requests)
+        self.requests_with_hits_ts = [] # (timestamp, num_hits)
+        self.requests_with_misses_ts = [] # (timestamp, num_misses)
+        self.requests_with_evictions_ts = [] # (timestamp, num_evictions)
+
+        self.init_time = time.time()
+
+    def record_hit(self, num_blocks: int, request_id=None):
+        if self.first_block:
+            # ignore first block because it will always hit
+            self.first_block = False
+            return
+
+        if request_id is not None:
+            if request_id not in self.tracked_requests:
+                print(f"[DEBUG] CacheTelemetry: Tracking new request ID: {request_id}")
+                self.unique_requests += 1
+                self.tracked_requests.add(request_id)
+                self.unique_requests_ts.append((time.time() - self.init_time, 1))
+            if request_id not in self.requests_with_hits:
+                self.requests_with_hits.add(request_id)
+                self.requests_with_hits_ts.append((time.time() - self.init_time, 1))
+
+        if num_blocks > 0:
+            # print(f"[DEBUG] HIT request_id: {request_id}, num_blocks: {num_blocks}")
+            self.total_blocks += num_blocks
+            self.total_hits += num_blocks
+
+            # record time series
+            timestamp = time.time() - self.init_time
+            self.total_blocks_ts.append((timestamp, num_blocks))
+            self.total_hits_ts.append((timestamp, num_blocks))
+
+    def record_miss(self, num_blocks: int, request_id=None):
+        if request_id is not None:
+            if request_id not in self.tracked_requests:
+                self.unique_requests += 1
+                self.tracked_requests.add(request_id)
+                self.unique_requests_ts.append((time.time() - self.init_time, 1))
+            if request_id not in self.requests_with_misses:
+                self.requests_with_misses.add(request_id)
+                self.requests_with_misses_ts.append((time.time() - self.init_time, 1))
+
+        if num_blocks > 0:
+            # print(f"[DEBUG] MISS request_id: {request_id}, num_blocks: {num_blocks}")
+            self.total_blocks += num_blocks
+            self.total_misses += num_blocks
+
+            # record time series
+            timestamp = time.time() - self.init_time
+            self.total_blocks_ts.append((timestamp, num_blocks))
+            self.total_misses_ts.append((timestamp, num_blocks))
+
+    def record_eviction(self, num_blocks: int, request_id=None):
+        self.total_evictions += num_blocks
+
+        # record time series
+        timestamp = time.time() - self.init_time
+        self.total_evictions_ts.append((timestamp, num_blocks))
+
+        if request_id is not None:
+            if request_id not in self.tracked_requests:
+                self.unique_requests += 1
+                self.tracked_requests.add(request_id)
+                self.unique_requests_ts.append((timestamp, 1))
+            # this path is dead as of now
+            if request_id not in self.requests_with_evictions:
+                self.requests_with_evictions.add(request_id)
+                self.requests_with_evictions_ts.append((timestamp, 1))
+
+            # record time series
+            self.requests_with_evictions_ts.append((timestamp, num_blocks))
+
+    def get_all_stats(self) -> dict:
+
+        return {
+            "block_level": {
+                "total_blocks": self.total_blocks if self.total_blocks > 0 else 0,
+                "hits": self.total_hits if self.total_hits > 0 else 0,
+                "misses": self.total_misses,
+                "evictions": self.total_evictions,
+                "hit_rate": self.total_hits / self.total_blocks if self.total_blocks > 0 else 0.,
+                "miss_rate": self.total_misses / self.total_blocks if self.total_blocks > 0 else 0.,
+            },
+            "request_level": {
+                "unique_requests": self.unique_requests,
+                "hits": len(self.requests_with_hits),
+                "misses": len(self.requests_with_misses),
+                "evictions": len(self.requests_with_evictions),
+                "hit_rate": len(self.requests_with_hits) / self.unique_requests if self.unique_requests > 0 else 0.,
+                "miss_rate": len(self.requests_with_misses) / self.unique_requests if self.unique_requests > 0 else 0.,
+            },
+            "block_level_ts": {
+                "total_blocks": self.total_blocks_ts,
+                "hits": self.total_hits_ts,
+                "misses": self.total_misses_ts,
+                "evictions": self.total_evictions_ts,
+            },
+            "request_level_ts": {
+                "unique_requests": self.unique_requests_ts,
+                "hits": self.requests_with_hits_ts,
+                "misses": self.requests_with_misses_ts,
+                "evictions": self.requests_with_evictions_ts,
+            },
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def record_stats(self):
+        # write to disk with safety measures
+        stats = self.get_all_stats()
+
+        with CacheTelemetry._file_lock:
+            try:
+                os.makedirs(self.output_dir, exist_ok=True)
+
+                filepath = os.path.join(self.output_dir, "cache_telemetry.json")
+
+                if not os.path.exists(filepath) and self.reset_cache_telemetry_on_new_file:
+                    self.reset()
+
+                with open(filepath, "w") as f:
+                    json.dump(stats, f, indent=4)
+
+            except (IOError, OSError) as e:
+                logger.warning(f"Failed to write cache telemetry stats: {e}")
 
 class PrometheusStatLogger(StatLoggerBase):
 

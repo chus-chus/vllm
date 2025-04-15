@@ -13,6 +13,7 @@ from vllm.v1.core.specialized_manager import get_specialized_manager
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.metrics.stats import PrefixCacheStats
 from vllm.v1.request import Request, RequestStatus
+from vllm.v1.metrics.loggers import CacheTelemetry
 
 logger = init_logger(__name__)
 
@@ -27,6 +28,7 @@ class KVCacheManager:
         caching_hash_algo: str = "builtin",
         num_preallocate_tokens: int = 64,
         log_stats: bool = False,
+        cache_telemetry: CacheTelemetry = None,
     ) -> None:
         assert len(kv_cache_config.kv_cache_groups) == 1, (
             "KVCacheManager does not support hybrid models with more than 1 "
@@ -61,6 +63,8 @@ class KVCacheManager:
             kv_cache_spec=kv_cache_spec,
             block_pool=self.block_pool,
         )
+        
+        self.cache_telemetry = cache_telemetry
 
         # Mapping from request ID to blocks to track the blocks allocated
         # for each request, so that we can free the blocks when the request
@@ -152,6 +156,10 @@ class KVCacheManager:
         
         if len(computed_blocks) > 0:
             self.prefix_cache_stats.request_hits += 1
+            
+        if self.log_stats:
+            self.cache_telemetry.record_hit(len(computed_blocks), request.request_id)
+            self.cache_telemetry.record_miss(len(block_hashes) - len(computed_blocks), request.request_id)
 
         if last_block_hash is not None:
             # Add back the last block hash if it was removed.
@@ -266,6 +274,9 @@ class KVCacheManager:
                 num_blocks_to_evict = num_new_blocks - num_readily_free_blocks
                 self.prefix_cache_stats.evictions += num_blocks_to_evict
                 self.prefix_cache_stats.request_evictions += 1
+                
+                if self.log_stats:
+                    self.cache_telemetry.record_eviction(num_blocks_to_evict, request.request_id)
                 
             # Concatenate the computed block IDs and the new block IDs.
             new_blocks = self.block_pool.get_new_blocks(num_new_blocks)

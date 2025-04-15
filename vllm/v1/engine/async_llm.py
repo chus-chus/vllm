@@ -35,7 +35,7 @@ from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.engine.processor import Processor
 from vllm.v1.executor.abstract import Executor
 from vllm.v1.metrics.loggers import (LoggingStatLogger, PrometheusStatLogger,
-                                     StatLoggerBase, CacheTelemetryLogger)
+                                     StatLoggerBase)
 from vllm.v1.metrics.stats import IterationStats, SchedulerStats
 
 logger = init_logger(__name__)
@@ -53,7 +53,6 @@ class AsyncLLM(EngineClient):
         use_cached_outputs: bool = False,
         log_requests: bool = True,
         start_engine_loop: bool = True,
-        cache_telemetry_output_dir: str = None
     ) -> None:
         if not envs.VLLM_USE_V1:
             raise ValueError(
@@ -67,21 +66,9 @@ class AsyncLLM(EngineClient):
         self.model_config = vllm_config.model_config
 
         self.log_requests = log_requests
-        self.log_stats = log_stats
-
-        # Set up stat loggers; independent set for each DP rank.
-        self.stat_loggers: list[list[StatLoggerBase]] = []
-        if self.log_stats:
-            loggers: list[StatLoggerBase] = []
-                # Only logging the cache telemetry for now.
-                
-                # if logger.isEnabledFor(logging.INFO):
-                #     loggers.append(LoggingStatLogger(engine_index=i))
-                # loggers.append(
-                #     PrometheusStatLogger(vllm_config, engine_index=i))
-                
-            loggers.append(CacheTelemetryLogger(output_dir=cache_telemetry_output_dir))
-            self.stat_loggers.append(loggers)
+        self.log_stats = log_stats      
+        
+        self.stat_loggers: list[list[StatLoggerBase]] = []      
 
         # Tokenizer (+ ensure liveness if running in another process).
         self.tokenizer = init_tokenizer_from_configs(
@@ -145,7 +132,6 @@ class AsyncLLM(EngineClient):
             log_requests=not disable_log_requests,
             log_stats=not disable_log_stats,
             usage_context=usage_context,
-            cache_telemetry_output_dir = cache_telemetry_output_dir,
         )
 
     @classmethod
@@ -369,10 +355,11 @@ class AsyncLLM(EngineClient):
         if not self.log_stats:
             return
 
-        assert scheduler_stats is not None
-        for stat_logger in self.stat_loggers[engine_index]:
-            stat_logger.record(engine_index, scheduler_stats=scheduler_stats,
-                               iteration_stats=iteration_stats)
+        # assert scheduler_stats is not None
+        # if stat_loggers is not None:
+        #     for stat_logger in self.stat_loggers[engine_index]:
+        #         stat_logger.record(engine_index, scheduler_stats=scheduler_stats,
+        #                         iteration_stats=iteration_stats)
 
     def encode(
         self,
