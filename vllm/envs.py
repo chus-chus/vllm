@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     VLLM_KEEP_ALIVE_ON_ENGINE_DEATH: bool = False
     CMAKE_BUILD_TYPE: Optional[str] = None
     VERBOSE: bool = False
-    VLLM_ALLOW_LONG_MAX_MODEL_LEN: bool = False
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: bool = True
     VLLM_RPC_TIMEOUT: int = 10000  # ms
     VLLM_PLUGINS: Optional[list[str]] = None
     VLLM_TORCH_PROFILER_DIR: Optional[str] = None
