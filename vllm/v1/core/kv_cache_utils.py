@@ -8,7 +8,7 @@ from typing import Any, Callable, NamedTuple, Optional
 
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.utils import sha256
+from vllm.utils import GiB_bytes, sha256
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, KVCacheSpec,
                                         KVCacheTensor, SlidingWindowSpec)
@@ -43,19 +43,19 @@ class BlockHashType(NamedTuple):
 # This aligns with the behavior of Python's hash() function, which also uses
 # a random seed if PYTHONHASHSEED is not set.
 NONE_HASH = int.from_bytes(os.urandom(32), byteorder="big") if os.getenv(
-    'PYTHONHASHSEED') is not None else sha256(os.getenv('PYTHONHASHSEED'))
+    'PYTHONHASHSEED') is None else sha256(os.getenv('PYTHONHASHSEED'))
 
 
 class PrefixCachingMetrics:
-    """Metrics for prefix caching with a hit rate of the most recent N requests.
+    """Metrics for prefix caching with a hit rate of the max recent N requests.
 
     Args:
-        interval: The number of the most recent requests to aggregate.
+        max_recent_requests: The number of the max recent requests to aggregate.
             Defaults to 1000.
     """
 
-    def __init__(self, interval: int = 1000):
-        self.interval = interval
+    def __init__(self, max_recent_requests: int = 1000):
+        self.max_recent_requests = max_recent_requests
         # The current aggregated values.
         self.aggregated_requests = 0
         self.aggregated_query_total = 0
@@ -318,7 +318,10 @@ def need_extra_keys(request: Request) -> bool:
 
     # Multimodal requests need to include the MM hash.
     # LoRA requests need to include the LoRA ID.
-    return bool(request.mm_positions) or (request.lora_request is not None)
+    # Request with provided cache salt need to include the salt.
+    return bool(request.mm_positions) or (request.lora_request
+                                          is not None) or (request.cache_salt
+                                                           is not None)
 
 
 def _gen_mm_extra_hash_keys(request: Request, start_token_idx: int,
@@ -423,8 +426,10 @@ def generate_block_hash_extra_keys(
     mm_extra_keys, new_start_mm_idx = _gen_mm_extra_hash_keys(
         request, start_token_idx, end_token_idx, start_mm_idx)
     lora_extra_keys: list[int] = _gen_lora_extra_hash_keys(request)
+    cache_salt_keys: list[str] = [request.cache_salt] if (
+        start_token_idx == 0 and request.cache_salt) else []
 
-    extra_keys: list[Any] = lora_extra_keys + mm_extra_keys
+    extra_keys: list[Any] = lora_extra_keys + mm_extra_keys + cache_salt_keys
 
     if not extra_keys:
         return None, new_start_mm_idx
@@ -502,6 +507,54 @@ def hash_request_tokens(hash_function: Any, block_size: int,
     return ret
 
 
+def estimate_max_model_len(vllm_config: VllmConfig,
+                           kv_cache_spec: dict[str, KVCacheSpec],
+                           available_memory: int) -> int:
+    """
+    Estimates the maximum model length that can fit in the available memory
+    using binary search.
+
+    Args:
+        vllm_config: The global VllmConfig
+        kv_cache_spec: The kv cache spec of each attention layer in the model
+        available_memory: Memory available for KV cache in bytes.
+
+    Returns:
+        The estimated maximum model length that can fit in the available memory.
+    """
+
+    # Define a function to check if a given model length fits in memory
+    def fits_in_memory(model_len: int) -> bool:
+        # Modify the max_model_len for this calculation
+        vllm_config.model_config.max_model_len = model_len
+        # Calculate memory needed for the given model length
+        memory_needed = sum(
+            (layer_spec.max_memory_usage_bytes(vllm_config)
+             for layer_spec in kv_cache_spec.values()),
+            start=0,
+        )
+        return memory_needed <= available_memory
+
+    # Binary search for the maximum model length
+    current_max = vllm_config.model_config.max_model_len
+    left, right = 1, current_max
+
+    # If even the smallest model length doesn't fit, return 0
+    if not fits_in_memory(left):
+        return 0
+
+    # Binary search for the maximum model length that fits
+    result = 1
+    while left <= right:
+        mid = (left + right) // 2
+        if fits_in_memory(mid):
+            result = mid
+            left = mid + 1
+        else:
+            right = mid - 1
+    return result
+
+
 def check_enough_kv_cache_memory(vllm_config: VllmConfig,
                                  kv_cache_spec: dict[str, KVCacheSpec],
                                  available_memory: int):
@@ -529,12 +582,21 @@ def check_enough_kv_cache_memory(vllm_config: VllmConfig,
         needed_memory += layer_spec.max_memory_usage_bytes(vllm_config)
 
     if needed_memory > available_memory:
+        # Estimate the maximum model length that can fit in the available memory
+        estimated_max_len = estimate_max_model_len(vllm_config, kv_cache_spec,
+                                                   available_memory)
+        estimated_msg = ""
+        if estimated_max_len > 0:
+            estimated_msg = " Based on the available memory,"
+            f" the estimated maximum model length is {estimated_max_len}."
+
         raise ValueError(
             f"To serve at least one request with the models's max seq len "
-            f"({max_model_len}), ({needed_memory/1024/1024/1024:.2f} GiB KV "
+            f"({max_model_len}), ({needed_memory/GiB_bytes:.2f} GiB KV "
             f"cache is needed, which is larger than the available KV cache "
-            f"memory ({available_memory/1024/1024/1024:.2f} GiB). Try "
-            f"increasing `gpu_memory_utilization` or decreasing "
+            f"memory ({available_memory/GiB_bytes:.2f} GiB)."
+            f"{estimated_msg} "
+            f" Try increasing `gpu_memory_utilization` or decreasing "
             f"`max_model_len` when initializing the engine.")
 
 
@@ -643,10 +705,10 @@ def _get_kv_cache_config_uniform_type(vllm_config: VllmConfig,
 def unify_hybrid_kv_cache_specs(kv_cache_spec: dict[str, KVCacheSpec]):
     """
     Only models with one type of KV cache are supported yet. This function tries
-    to convert the KV cache specs to one type if the model is a hybrid model 
+    to convert the KV cache specs to one type if the model is a hybrid model
     with multiple type of KV cache. It will convert all SlidingWindowSpec to
     FullAttentionSpec if both types are present.
-    
+
     Args:
         kv_cache_spec: The kv cache spec of each attention layer in the model
     """

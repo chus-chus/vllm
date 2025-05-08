@@ -113,12 +113,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         super().process_weights_after_loading(layer)
 
-        layer.w13_weight = torch.nn.Parameter(self._maybe_pad_weight(
-            layer.w13_weight.data),
-                                              requires_grad=False)
-        layer.w2_weight = torch.nn.Parameter(self._maybe_pad_weight(
-            layer.w2_weight.data),
-                                             requires_grad=False)
+        # Padding the weight for better performance on ROCm
+        layer.w13_weight.data = self._maybe_pad_weight(layer.w13_weight.data)
+        layer.w2_weight.data = self._maybe_pad_weight(layer.w2_weight.data)
         # Lazy import to avoid importing triton.
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
             is_rocm_aiter_moe_enabled, shuffle_weights)
@@ -127,10 +124,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             shuffled_w13, shuffled_w2 = shuffle_weights(
                 layer.w13_weight.data, layer.w2_weight.data)
 
-            layer.w13_weight = torch.nn.Parameter(shuffled_w13,
-                                                  requires_grad=False)
-            layer.w2_weight = torch.nn.Parameter(shuffled_w2,
-                                                 requires_grad=False)
+            layer.w13_weight.data = shuffled_w13
+            layer.w2_weight.data = shuffled_w2
 
         if current_platform.is_cpu():
             if current_platform.get_cpu_architecture() == CpuArchEnum.X86:
@@ -422,6 +417,7 @@ class FusedMoE(torch.nn.Module):
 
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
+        self.params_dtype = params_dtype
 
         # Note: here we guard against accessing the TP and DP groups when
         # uninitialized (this happens when testing)
@@ -472,6 +468,7 @@ class FusedMoE(torch.nn.Module):
         self.global_num_experts = num_experts
 
         assert intermediate_size % self.tp_size == 0
+        self.hidden_size = hidden_size
         self.intermediate_size_per_partition = intermediate_size // self.tp_size
         self.reduce_results = reduce_results
         self.renormalize = renormalize
@@ -512,7 +509,9 @@ class FusedMoE(torch.nn.Module):
         }
         # need full intermediate size pre-sharding for WNA16 act order
         if (self.quant_method.__class__.__name__
-                in ("GPTQMarlinMoEMethod", "CompressedTensorsWNA16MoEMethod")):
+                in ("GPTQMarlinMoEMethod",
+                    "CompressedTensorsWNA16MarlinMoEMethod",
+                    "CompressedTensorsWNA16MoEMethod")):
             moe_quant_params["intermediate_size_full"] = intermediate_size
 
         self.quant_method.create_weights(layer=self, **moe_quant_params)
@@ -648,9 +647,10 @@ class FusedMoE(torch.nn.Module):
         # compressed-tensors checkpoints with packed weights are stored flipped
         # TODO (mgoin): check self.quant_method.quant_config.quant_format
         # against known CompressionFormat enum values that have this quality
-        loaded_weight = loaded_weight.t().contiguous() if (
-            self.quant_method.__class__.__name__
-            == "CompressedTensorsWNA16MoEMethod") else loaded_weight
+        if self.quant_method.__class__.__name__ in (
+                "CompressedTensorsWNA16MarlinMoEMethod",
+                "CompressedTensorsWNA16MoEMethod"):
+            loaded_weight = loaded_weight.t().contiguous()
 
         if shard_id not in ("w1", "w2", "w3"):
             raise ValueError(f"shard_id must be ['w1','w2','w3'] but "
@@ -801,10 +801,11 @@ class FusedMoE(torch.nn.Module):
                 scoring_func=scoring_func,
                 e_score_correction_bias=e_score_correction_bias)
         elif custom_routing_function is None:
-            topk_weights, topk_ids = fused_topk(hidden_states=hidden_states,
-                                                gating_output=router_logits,
-                                                topk=top_k,
-                                                renormalize=renormalize)
+            topk_weights, topk_ids, token_expert_indices = fused_topk(
+                hidden_states=hidden_states,
+                gating_output=router_logits,
+                topk=top_k,
+                renormalize=renormalize)
         else:
             topk_weights, topk_ids = custom_routing_function(
                 hidden_states=hidden_states,
